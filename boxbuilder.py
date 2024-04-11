@@ -15,6 +15,8 @@ from enum import Enum
 
 from Cuboid import *
 
+import bmesh
+
 
 def clear_objects():
     objects = bpy.context.scene.objects
@@ -31,29 +33,12 @@ def clear_objects():
 # Clear existing blender objects
 clear_objects()
 
-
-def left(value):
-    return Vector((0, -value, 0))
-
-
-def right(value):
-    return Vector((0, value, 0))
-
-
-def up(value):
-    return Vector((0, 0, value))
-
-
-def down(value):
-    return Vector((0, 0, -value))
-
-
-def forward(value):
-    return Vector((value, 0, 0))
-
-
-def backward(value):
-    return Vector((-value, 0, 0))
+left = Vector((0, -1, 0))
+right = Vector((0, 1, 0))
+up = Vector((0, 0, 1))
+down = Vector((0, 0, -1))
+forward = Vector((1, 0, 0))
+backward = Vector((-1, 0, 0))
 
 
 class Side(Enum):
@@ -444,25 +429,25 @@ class Box(BlueprintContainer):
         self.add_children([botpart, leftpart, rightpart, toppart, backpart, frontpart])
 
 
-# Box parameters
-thickness = 0.02
-width = 0.80
-depth = 0.50
-height = 0.30
+# # Box parameters
+# thickness = 0.02
+# width = 0.80
+# depth = 0.50
+# height = 0.30
 
-box1 = Box(
-    "Box1",
-    0,
-    0,
-    0,
-    depth,
-    width,
-    height,
-    thickness,
-    big_side=Side.BotTop,
-    small_side=Side.LeftRight,
-)
-box1.create()
+# box1 = Box(
+#     "Box1",
+#     0,
+#     0,
+#     0,
+#     depth,
+#     width,
+#     height,
+#     thickness,
+#     big_side=Side.BotTop,
+#     small_side=Side.LeftRight,
+# )
+# box1.create()
 
 # box2 = Box(
 #     "Box2",
@@ -491,3 +476,106 @@ box1.create()
 #     small_side=Side.BotTop,
 # )
 # box3.create()
+
+
+def create_frame_part(width, height, thickness):
+    # Create a new mesh
+    mesh = bpy.data.meshes.new(name="FramePartMesh")
+    obj = bpy.data.objects.new(name="FramePart", object_data=mesh)
+    bpy.context.collection.objects.link(obj)
+
+    # Create a bmesh
+    bm = bmesh.new()
+
+    # Define corner vertices
+    corners = [
+        (-width / 2, -height / 2, 0),
+        (-width / 2, height / 2, 0),
+        (width / 2, height / 2, 0),
+        (width / 2, -height / 2, 0),
+    ]
+
+    # Create vertices and edges for each corner
+    for i in range(4):
+        v1 = bm.verts.new(corners[i])
+        v2 = bm.verts.new(corners[(i + 1) % 4])
+        e = bm.edges.new((v1, v2))
+
+    # Connect corners with edges
+    for i in range(4):
+        v1 = bm.verts[i]
+        v2 = bm.verts[(i + 1) % 4]
+        v3 = bm.verts[(i + 2) % 4]
+        bm.edges.new((v1, v3))
+
+    # Extrude the face to give it thickness
+    bottom_face = bm.faces.new(bm.verts)
+    bmesh.ops.translate(bm, vec=(0, 0, thickness))
+    top_face = bm.faces.new(bm.verts)
+
+    # Update the bmesh and mesh
+    bm.to_mesh(mesh)
+    bm.free()
+
+
+# Example usage
+# create_frame_part(width=2.0, height=2.0, thickness=0.1)
+
+
+class Quad(Blueprint):
+    """Use this to specify a quad that will be rendered."""
+
+    def __init__(
+        self, name="Quad", vertices=[(1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0)]
+    ):
+        """Anti-clockwise order."""
+        super().__init__(name)
+
+        # Vertices coordinates
+        self.vertices = vertices
+        self.edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        self.faces = [(0, 1, 2, 3)]
+
+    def _create(self):
+        """
+        Private create method.
+        Creates an empty node if not overriden.
+        """
+        # Create mesh and object
+        mesh = bpy.data.meshes.new("QuadMesh")
+        self.blender_object = bpy.data.objects.new(self.name, mesh)
+
+        # Set mesh location and scene
+        self.blender_object.location = bpy.context.scene.cursor.location
+        bpy.context.collection.objects.link(self.blender_object)
+
+        # Create mesh
+        mesh.from_pydata(self.vertices, self.edges, self.faces)
+
+        # Update mesh geometry
+        mesh.update()
+
+
+# Quad().create()
+
+width = 2
+height = 1
+thickness = 0.1
+
+upDirection = up
+rightDirection = right
+
+botLeft = Vector((0, 0, 0))
+botRight = botLeft + right * width
+topRight = botRight + upDirection * height
+topLeft = botLeft + upDirection * height
+botLeftInner = botLeft + thickness * (upDirection + rightDirection)
+botRightInner = botRight + thickness * (upDirection - rightDirection)
+topRightInner = topRight + thickness * (-upDirection - rightDirection)
+topLeftInner = topLeft + thickness * (-upDirection + rightDirection)
+
+
+Quad("BotQuad", [botLeft, botRight, botRightInner, botLeftInner]).create()
+Quad("RightQuad", [botRight, topRight, topRightInner, botRightInner]).create()
+Quad("TopQuad", [topRight, topLeft, topLeftInner, topRightInner]).create()
+Quad("TopQuad", [topLeft, botLeft, botLeftInner, topLeftInner]).create()
