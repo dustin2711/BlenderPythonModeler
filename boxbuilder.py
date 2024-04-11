@@ -107,11 +107,15 @@ class BlueprintContainer(Blueprint):
     def add_children(self, children: list[Blueprint]):
         self.children.extend(children)
 
-    def create(self):
+    def create(self, parent=None):
         super().create()
 
         for child in self.children:
             child.create(self)
+            # try:
+            #     child.create(self)
+            # except:
+            #     print("bla")
 
 
 class Cuboid(Blueprint):
@@ -556,26 +560,169 @@ class Quad(Blueprint):
         mesh.update()
 
 
-# Quad().create()
-
-width = 2
-height = 1
-thickness = 0.1
-
-upDirection = up
-rightDirection = right
-
-botLeft = Vector((0, 0, 0))
-botRight = botLeft + right * width
-topRight = botRight + upDirection * height
-topLeft = botLeft + upDirection * height
-botLeftInner = botLeft + thickness * (upDirection + rightDirection)
-botRightInner = botRight + thickness * (upDirection - rightDirection)
-topRightInner = topRight + thickness * (-upDirection - rightDirection)
-topLeftInner = topLeft + thickness * (-upDirection + rightDirection)
+def enumerate_two_elements(list):
+    """Enumerates an iterable, yielding pairs of consecutive elements."""
+    item = iter(list)
+    previous = next(item)
+    for item in item:
+        yield previous, item
+        previous = item
 
 
-Quad("BotQuad", [botLeft, botRight, botRightInner, botLeftInner]).create()
-Quad("RightQuad", [botRight, topRight, topRightInner, botRightInner]).create()
-Quad("TopQuad", [topRight, topLeft, topLeftInner, topRightInner]).create()
-Quad("TopQuad", [topLeft, botLeft, botLeftInner, topLeftInner]).create()
+# Example usage
+my_list = [1, 2, 3, 4, 5]
+for item1, item2 in enumerate_two_elements(my_list):
+    print(f"Item1: {item1}, Item2: {item2}")
+
+
+class Palisade(BlueprintContainer):
+    """Specifies quads by base points and an offset by whom they are extruded."""
+
+    def __init__(
+        self,
+        name="Palisade",
+        basePoints: list[Vector] = [
+            Vector((0, 0, 0)),
+            Vector((1, 0, 0)),
+            Vector((1, 1, 0)),
+            Vector((0, 1, 0)),
+        ],
+        offset=Vector((0, 0, 1)),
+        closeLoop=True,
+    ):
+        super().__init__(name)
+
+        self.basePoints = basePoints
+        self.closeLoop = closeLoop
+
+        self.halfOffsettedPoints = [point + 0.5 * offset for point in basePoints]
+
+        offsettedPoints = [point + offset for point in basePoints]
+        self.offsettedPoints = offsettedPoints
+
+        # Add start to end?
+        if closeLoop:
+            basePoints.append(basePoints[0])
+            offsettedPoints.append(offsettedPoints[0])
+
+        for (point, nextPoint), (offsetted, nextOffsetted) in zip(
+            enumerate_two_elements(basePoints), enumerate_two_elements(offsettedPoints)
+        ):
+            quad = Quad("Quad", [point, nextPoint, nextOffsetted, offsetted])
+            self.add_child(quad)
+
+
+class Frame3d(BlueprintContainer):
+    """A 3d frame consisting of two 2d frames and their connection. Like an actual window frame."""
+
+    def __init__(
+        self,
+        name="Frame3d",
+        botLeft=Vector((0, 0, 0)),
+        width=2,
+        height=1,
+        frameThickness=0.1,
+        upDirection=up,
+        rightDirection=right,
+        frontDirection=forward,
+        depth=0.2,
+    ):
+        super().__init__(name)
+
+        def createFrame(frameName, botLeftPosition):
+            """Creates the frame for the back or the front."""
+            return Frame(
+                frameName,
+                botLeftPosition,
+                width,
+                height,
+                frameThickness,
+                upDirection,
+                rightDirection,
+            )
+
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.frameThickness = frameThickness
+
+        self.backFrame = createFrame("BackFrame", botLeft)
+        self.frontFrame = createFrame("FrontFrame", botLeft + frontDirection * depth)
+
+        self.outerPalisade = Palisade(
+            "OuterPalisade", self.backFrame.outerPoints, Vector((depth, 0, 0))
+        )
+        self.innerPalisade = Palisade(
+            "InnerPalisade", self.backFrame.innerPoints, Vector((depth, 0, 0))
+        )
+        self.add_children(
+            [self.frontFrame, self.backFrame, self.outerPalisade, self.innerPalisade]
+        )
+
+
+class Frame(BlueprintContainer):
+    """A flat frame consisting of 4 quads like a window front."""
+
+    def __init__(
+        self,
+        name="Frame",
+        botLeft=Vector((0, 0, 0)),
+        width=2,
+        height=1,
+        frameThickness=0.1,
+        upDirection=up,
+        rightDirection=right,
+    ):
+        super().__init__(name)
+
+        self.botLeft = Vector(botLeft)
+        self.botRight = botLeft + right * width
+        self.topRight = self.botRight + upDirection * height
+        self.topLeft = botLeft + upDirection * height
+        self.botLeftInner = botLeft + frameThickness * (upDirection + rightDirection)
+        self.botRightInner = self.botRight + frameThickness * (
+            upDirection - rightDirection
+        )
+        self.topRightInner = self.topRight + frameThickness * (
+            -upDirection - rightDirection
+        )
+        self.topLeftInner = self.topLeft + frameThickness * (
+            -upDirection + rightDirection
+        )
+
+        self.outerPoints = [self.botLeft, self.botRight, self.topRight, self.topLeft]
+        self.innerPoints = [
+            self.botLeftInner,
+            self.botRightInner,
+            self.topRightInner,
+            self.topLeftInner,
+        ]
+
+        self.botQuad = Quad(
+            "BotQuad", [botLeft, self.botRight, self.botRightInner, self.botLeftInner]
+        )
+        self.rightQuad = Quad(
+            "RightQuad",
+            [self.botRight, self.topRight, self.topRightInner, self.botRightInner],
+        )
+        self.topQuad = Quad(
+            "TopQuad",
+            [self.topRight, self.topLeft, self.topLeftInner, self.topRightInner],
+        )
+        self.leftQuad = Quad(
+            "LeftQuad", [self.topLeft, botLeft, self.botLeftInner, self.topLeftInner]
+        )
+        self.quads = [
+            self.botQuad,
+            self.rightQuad,
+            self.topQuad,
+            self.leftQuad,
+        ]
+        self.add_children(self.quads)
+
+
+frame = Frame3d("WindowFrame", width=1.24, height=1.27, frameThickness=0.07, depth=0.06)
+window = Quad("Windowpane", frame.innerPalisade.halfOffsettedPoints)
+
+frame.create()
+window.create()
