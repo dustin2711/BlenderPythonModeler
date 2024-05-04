@@ -58,7 +58,7 @@ class Blueprint:
         self.parent: Blueprint = parent
         """The parent blueprint (if available). """
 
-        self.blender_object: bpy.types.Object = None
+        self.blenderObject: bpy.types.Object = None
         """The created Blender object. This is None if create() was not called yet. """
 
         self.automaticallyAddsBlenderObject = False
@@ -78,13 +78,13 @@ class Blueprint:
         """Creates a Blender object from this blueprint.
         Also sets the parent if it is available."""
 
-        self.blender_object = self._createBlenderObject()
+        self.blenderObject = self._createBlenderObject()
 
         if not self.automaticallyAddsBlenderObject:
             self.addToBlenderCollection()
 
         # Set name
-        self.blender_object.name = self.name
+        self.blenderObject.name = self.name
         # if self.parent:
         #     self.blender_object.name = self.parent.name + "." + self.name
 
@@ -92,10 +92,10 @@ class Blueprint:
 
         # Set parent of the blender object if a parent is associated with this blueprint
         if self.parent:
-            if not self.parent.blender_object:
+            if not self.parent.blenderObject:
                 self.write("PARENT IS MISSING!")
-            self.blender_object.parent = self.parent.blender_object
-            self.write(f"New parent = {self.parent.blender_object.name}\n\n")
+            self.blenderObject.parent = self.parent.blenderObject
+            self.write(f"New parent = {self.parent.blenderObject.name}\n\n")
         # else:
         #     # self.print(f"Missing parent")
         #     try:
@@ -121,7 +121,7 @@ class Blueprint:
         # - Does not work:  bpy.context.scene.collection
         collectionObjects = bpy.context.collection.objects
         try:
-            collectionObjects.link(self.blender_object)
+            collectionObjects.link(self.blenderObject)
             self.write("Object added to blender collection.")
         except RuntimeError as error:
             self.write(f"Could not add. {error}")
