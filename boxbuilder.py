@@ -50,30 +50,29 @@ class Side(Enum):
     """Back and front. """
 
 
-rounding = 0.001
-
-
 class Blueprint:
-    def __init__(self, name=""):
-        self.name = name if name else "Blueprint"
-        self.parent: Blueprint = None
+    """An instruction how a geometric is rendered."""
+
+    def __init__(self, name="Blueprint", parent: "Blueprint" = None):
+        self.name = f"{((parent.name + '.') if parent else '')}{name}"
+        self.parent: Blueprint = parent
         """The parent blueprint (if available). """
         self.blender_object: bpy.types.Object = None
         """The created Blender object. This is None if create() was not called yet. """
 
-    @staticmethod
-    def roundfloat(value, roundTo=rounding):
-        return round(value / roundTo) * roundTo
+    def __repr__(self) -> str:
+        return f"{type(self)} {self.name}"
 
-    def create(self, parent=None):
+    # @staticmethod
+    # def roundfloat(value, roundTo=0.001):
+    #     """Round to millimeter or any other value just for better representation."""
+    #     return round(value / roundTo) * roundTo
+
+    def create(self):
         """Creates a Blender object from this blueprint.
         Also sets the parent if it is available."""
 
-        # Set parent if given
-        if parent:
-            self.parent = parent
-
-        self._create()
+        self.createEmptyNode()
 
         # Set name
         self.blender_object.name = self.name
@@ -83,35 +82,49 @@ class Blueprint:
         # Set parent if available
         if self.parent and self.parent.blender_object:
             self.blender_object.parent = self.parent.blender_object
+            print(
+                f"New parent of '{self.blender_object.name}' is '{self.parent.blender_object.name}'"
+            )
+        else:
+            print(f"Missing parent for {self.name}")
+            collection = bpy.data.collections.get("Collection")
+            try:
+                collection.objects.link(self.blender_object)
+            except RuntimeError:
+                print(f"{self.name} already exists in Collection.")
+            # self.blender_object.parent = collection
 
-    def _create(self):
+    def createEmptyNode(self):
         """
         Private create method.
         Creates an empty node if not overriden.
         """
         self.blender_object = bpy.data.objects.new(self.name, None)
+        self.blender_object.name = self.name
         bpy.context.scene.collection.objects.link(self.blender_object)
 
 
 class BlueprintContainer(Blueprint):
     """Parent of multiple blueprint children."""
 
-    def __init__(self, name="BlueprintContainer"):
-        super().__init__(name)
+    def __init__(self, name="BlueprintContainer", parent=None):
+        super().__init__(name, parent)
 
         self.children: list[Blueprint] = []
 
     def add_child(self, child: Blueprint):
+        """Adds the child to the list so it can be created together."""
         self.children.append(child)
 
     def add_children(self, children: list[Blueprint]):
+        """Adds the children to the list so they can be created together."""
         self.children.extend(children)
 
-    def create(self, parent=None):
+    def create(self):
         super().create()
 
         for child in self.children:
-            child.create(self)
+            child.create()
             # try:
             #     child.create(self)
             # except:
@@ -121,117 +134,75 @@ class BlueprintContainer(Blueprint):
 class Cuboid(Blueprint):
     """Use this to specify a cuboid that will be rendered."""
 
-    def __init__(self, name="Cuboid", left=0, right=1, bot=0, top=1, back=0, front=1):
-        super().__init__(name)
-        self._left = left
-        self._right = right
-        self._bot = bot
-        self._top = top
-        self._back = back
-        self._front = front
+    def __init__(
+        self,
+        name="Cuboid",
+        parent: Blueprint = None,
+        left=0,
+        right=1,
+        bot=0,
+        top=1,
+        back=0,
+        front=1,
+    ):
+        super().__init__(name, parent)
+        self.left = left
+        self.right = right
+        self.bot = bot
+        self.top = top
+        self.back = back
+        self.front = front
 
     def move(self, x=0, y=0, z=0):
-        self._left += y
-        self._right += y
-        self._back += x
-        self._front += x
-        self._bot += z
-        self._top += z
-
-    # 6 main values
-
-    @property
-    def left(self):
-        return self._left
-
-    @left.setter
-    def left(self, value: float):
-        self._left = self.roundfloat(value)
-
-    @property
-    def right(self):
-        return self._right
-
-    @right.setter
-    def right(self, value: float):
-        self._right = self.roundfloat(value)
-
-    @property
-    def bot(self):
-        return self._bot
-
-    @bot.setter
-    def bot(self, value: float):
-        self._bot = self.roundfloat(value)
-
-    @property
-    def top(self):
-        return self._top
-
-    @top.setter
-    def top(self, value: float):
-        self._top = self.roundfloat(value)
-
-    @property
-    def back(self):
-        return self._back
-
-    @back.setter
-    def back(self, value: float):
-        self._back = self.roundfloat(value)
-
-    @property
-    def front(self):
-        return self._front
-
-    @front.setter
-    def front(self, value: float):
-        self._front = self.roundfloat(value)
-
-    # Size
+        self.left += y
+        self.right += y
+        self.back += x
+        self.front += x
+        self.bot += z
+        self.top += z
 
     @property
     def height(self):
-        return self._top - self._bot
+        return self.top - self.bot
 
     @height.setter
     def height(self, value: float):
         """Changes  so that height is as given."""
         """Changes top (if positive) or bot (if negative) so that width is as given."""
         if value < 0:
-            self._bot = self.roundfloat(self._top + value)
+            self.bot = self.top + value
         else:
-            self._top = self.roundfloat(self._bot + value)
+            self.top = self.bot + value
 
     @property
     def width(self):
-        return self._right - self._left
+        return self.right - self.left
 
     @width.setter
     def width(self, value: float):
         """Changes right (if positive) or left (if negative) so that width is as given."""
         if value < 0:
-            self._left = self.roundfloat(self._right + value)
+            self.left = self.right + value
         else:
-            self._right = self.roundfloat(self._left + value)
+            self.right = self.left + value
 
     @property
     def depth(self):
-        return self._front - self._back
+        return self.front - self.back
 
     @depth.setter
     def depth(self, value: float):
         """Changes front (if positive) or back (if negative) so that width is as given."""
         if value < 0:
-            self._back = self.roundfloat(self._front + value)
+            self.back = self.front + value
         else:
-            self._front = self.roundfloat(self._back + value)
+            self.front = self.back + value
 
     # Corners
 
     @property
     def frontrighttop(self):
-        return Vector((self._front, self._right, self._top))
+        return Vector((self.front, self.right, self.top))
 
     @frontrighttop.setter
     def frontrighttop(self, value: Vector):
@@ -311,7 +282,7 @@ class Cuboid(Blueprint):
 
     # Functions
 
-    def _create(self):
+    def createEmptyNode(self):
         dimensions = self.frontrighttop - self.backleftbot
         location = self.backleftbot + dimensions / 2
 
@@ -326,7 +297,7 @@ class Cuboid(Blueprint):
         self.blender_object = bpy.context.object
 
     def __str__(self):
-        return f"Cube: {self._left} to {self._right}, {self._bot} to {self._top}, {self._back} to {self._front}"
+        return f"Cube: {self.left} to {self.right}, {self.bot} to {self.top}, {self.back} to {self.front}"
 
     def __repr__(self):
         return self.__str__()
@@ -341,6 +312,7 @@ class Box(BlueprintContainer):
 
     def __init__(
         self,
+        parent: Blueprint = None,
         name="Box",
         back=0,
         left=0,
@@ -353,7 +325,7 @@ class Box(BlueprintContainer):
         small_side=Side.BotTop,  # The side where both planks have no max size in neither direction (the not so beautiful side)
     ):
         """Creates a box out of 6 cuboid with the outer given size and the given thickness for each side."""
-        super().__init__(name)
+        super().__init__(name, parent)
 
         if big_side == small_side:
             raise ValueError("Outer and inner side must differ.")
@@ -380,7 +352,7 @@ class Box(BlueprintContainer):
         )
 
         # Bot part
-        botpart = Cuboid("botpart")
+        botpart = Cuboid("botpart", self)
         botpart.backleftbot = backleftbot
         botpart.height = thickness
         botpart.width = width
@@ -393,7 +365,7 @@ class Box(BlueprintContainer):
             botpart.front -= thickness
 
         # Left part
-        leftpart = Cuboid("leftpart")
+        leftpart = Cuboid("leftpart", self)
         leftpart.backleftbot = backleftbot
         leftpart.width = thickness
         leftpart.front = depth
@@ -406,7 +378,7 @@ class Box(BlueprintContainer):
             leftpart.front -= thickness
 
         # Back part
-        backpart = Cuboid("backpart")
+        backpart = Cuboid("backpart", self)
         backpart.backleftbot = backleftbot
         backpart.depth = thickness
         backpart.width = width
@@ -419,15 +391,15 @@ class Box(BlueprintContainer):
             backpart.top -= thickness
 
         # Right part
-        rightpart = leftpart.copy("rightpart")
+        rightpart = leftpart.copy("rightpart", self)
         rightpart.move(y=width - thickness)
 
         # Top part
-        toppart = botpart.copy("toppart")
+        toppart = botpart.copy("toppart", self)
         toppart.move(z=height - thickness)
 
         # Bot part
-        frontpart = backpart.copy("frontpart")
+        frontpart = backpart.copy("frontpart", self)
         frontpart.move(x=depth - thickness)
 
         self.add_children([botpart, leftpart, rightpart, toppart, backpart, frontpart])
@@ -482,65 +454,24 @@ class Box(BlueprintContainer):
 # box3.create()
 
 
-def create_frame_part(width, height, thickness):
-    # Create a new mesh
-    mesh = bpy.data.meshes.new(name="FramePartMesh")
-    obj = bpy.data.objects.new(name="FramePart", object_data=mesh)
-    bpy.context.collection.objects.link(obj)
-
-    # Create a bmesh
-    bm = bmesh.new()
-
-    # Define corner vertices
-    corners = [
-        (-width / 2, -height / 2, 0),
-        (-width / 2, height / 2, 0),
-        (width / 2, height / 2, 0),
-        (width / 2, -height / 2, 0),
-    ]
-
-    # Create vertices and edges for each corner
-    for i in range(4):
-        v1 = bm.verts.new(corners[i])
-        v2 = bm.verts.new(corners[(i + 1) % 4])
-        e = bm.edges.new((v1, v2))
-
-    # Connect corners with edges
-    for i in range(4):
-        v1 = bm.verts[i]
-        v2 = bm.verts[(i + 1) % 4]
-        v3 = bm.verts[(i + 2) % 4]
-        bm.edges.new((v1, v3))
-
-    # Extrude the face to give it thickness
-    bottom_face = bm.faces.new(bm.verts)
-    bmesh.ops.translate(bm, vec=(0, 0, thickness))
-    top_face = bm.faces.new(bm.verts)
-
-    # Update the bmesh and mesh
-    bm.to_mesh(mesh)
-    bm.free()
-
-
-# Example usage
-# create_frame_part(width=2.0, height=2.0, thickness=0.1)
-
-
 class Quad(Blueprint):
     """Use this to specify a quad that will be rendered."""
 
     def __init__(
-        self, name="Quad", vertices=[(1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0)]
+        self,
+        name="Quad",
+        parent: Blueprint = None,
+        vertices=[(1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0)],
     ):
         """Anti-clockwise order."""
-        super().__init__(name)
+        super().__init__(name, parent)
 
         # Vertices coordinates
         self.vertices = vertices
         self.edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
         self.faces = [(0, 1, 2, 3)]
 
-    def _create(self):
+    def createEmptyNode(self):
         """
         Private create method.
         Creates an empty node if not overriden.
@@ -581,6 +512,7 @@ class Palisade(BlueprintContainer):
     def __init__(
         self,
         name="Palisade",
+        parent=None,
         basePoints: list[Vector] = [
             Vector((0, 0, 0)),
             Vector((1, 0, 0)),
@@ -590,7 +522,7 @@ class Palisade(BlueprintContainer):
         offset=Vector((0, 0, 1)),
         closeLoop=True,
     ):
-        super().__init__(name)
+        super().__init__(name, parent)
 
         self.basePoints = basePoints
         self.closeLoop = closeLoop
@@ -608,7 +540,7 @@ class Palisade(BlueprintContainer):
         for (point, nextPoint), (offsetted, nextOffsetted) in zip(
             enumerate_two_elements(basePoints), enumerate_two_elements(offsettedPoints)
         ):
-            quad = Quad("Quad", [point, nextPoint, nextOffsetted, offsetted])
+            quad = Quad("Quad", self, [point, nextPoint, nextOffsetted, offsetted])
             self.add_child(quad)
 
 
@@ -618,25 +550,27 @@ class Frame3d(BlueprintContainer):
     def __init__(
         self,
         name="Frame3d",
+        parent: Blueprint = None,
         botLeft=Vector((0, 0, 0)),
         width=2,
         height=1,
-        frameThickness=0.1,
+        frameWidth=0.1,
         upDirection=up,
         rightDirection=right,
         frontDirection=forward,
         depth=0.2,
     ):
-        super().__init__(name)
+        super().__init__(name, parent)
 
         def createFrame(frameName, botLeftPosition):
             """Creates the frame for the back or the front."""
             return Frame(
                 frameName,
+                self,
                 botLeftPosition,
                 width,
                 height,
-                frameThickness,
+                frameWidth,
                 upDirection,
                 rightDirection,
             )
@@ -644,16 +578,16 @@ class Frame3d(BlueprintContainer):
         self.width = width
         self.height = height
         self.depth = depth
-        self.frameThickness = frameThickness
+        self.frameThickness = frameWidth
 
         self.backFrame = createFrame("BackFrame", botLeft)
         self.frontFrame = createFrame("FrontFrame", botLeft + frontDirection * depth)
 
         self.outerPalisade = Palisade(
-            "OuterPalisade", self.backFrame.outerPoints, Vector((depth, 0, 0))
+            "OuterPalisade", self, self.backFrame.outerPoints, Vector((depth, 0, 0))
         )
         self.innerPalisade = Palisade(
-            "InnerPalisade", self.backFrame.innerPoints, Vector((depth, 0, 0))
+            "InnerPalisade", self, self.backFrame.innerPoints, Vector((depth, 0, 0))
         )
         self.add_children(
             [self.frontFrame, self.backFrame, self.outerPalisade, self.innerPalisade]
@@ -666,6 +600,7 @@ class Frame(BlueprintContainer):
     def __init__(
         self,
         name="Frame",
+        parent: Blueprint = None,
         botLeft=Vector((0, 0, 0)),
         width=2,
         height=1,
@@ -673,7 +608,7 @@ class Frame(BlueprintContainer):
         upDirection=up,
         rightDirection=right,
     ):
-        super().__init__(name)
+        super().__init__(name, parent)
 
         self.botLeft = Vector(botLeft)
         self.botRight = botLeft + right * width
@@ -699,18 +634,24 @@ class Frame(BlueprintContainer):
         ]
 
         self.botQuad = Quad(
-            "BotQuad", [botLeft, self.botRight, self.botRightInner, self.botLeftInner]
+            "BotQuad",
+            self,
+            [botLeft, self.botRight, self.botRightInner, self.botLeftInner],
         )
         self.rightQuad = Quad(
             "RightQuad",
+            self,
             [self.botRight, self.topRight, self.topRightInner, self.botRightInner],
         )
         self.topQuad = Quad(
             "TopQuad",
+            self,
             [self.topRight, self.topLeft, self.topLeftInner, self.topRightInner],
         )
         self.leftQuad = Quad(
-            "LeftQuad", [self.topLeft, botLeft, self.botLeftInner, self.topLeftInner]
+            "LeftQuad",
+            self,
+            [self.topLeft, botLeft, self.botLeftInner, self.topLeftInner],
         )
         self.quads = [
             self.botQuad,
@@ -721,8 +662,10 @@ class Frame(BlueprintContainer):
         self.add_children(self.quads)
 
 
-frame = Frame3d("WindowFrame", width=1.24, height=1.27, frameThickness=0.07, depth=0.06)
-window = Quad("Windowpane", frame.innerPalisade.halfOffsettedPoints)
+frame = Frame3d(
+    "WindowFrame", None, width=1.235, height=1.27, frameWidth=0.069, depth=0.014
+)
+window = Quad("Windowpane", None, frame.innerPalisade.halfOffsettedPoints)
 
 frame.create()
 window.create()
