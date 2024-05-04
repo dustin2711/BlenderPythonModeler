@@ -57,11 +57,17 @@ class Blueprint:
         self.name = f"{((parent.name + '.') if parent else '')}{name}"
         self.parent: Blueprint = parent
         """The parent blueprint (if available). """
+
         self.blender_object: bpy.types.Object = None
         """The created Blender object. This is None if create() was not called yet. """
 
+        self.automaticallyAddsBlenderObject = False
+
     def __repr__(self) -> str:
         return f"{type(self)} {self.name}"
+
+    def write(self, message: str) -> None:
+        print(self.name + ": " + str(message))
 
     # @staticmethod
     # def roundfloat(value, roundTo=0.001):
@@ -72,36 +78,53 @@ class Blueprint:
         """Creates a Blender object from this blueprint.
         Also sets the parent if it is available."""
 
-        self.createEmptyNode()
+        self.blender_object = self._createBlenderObject()
+
+        if not self.automaticallyAddsBlenderObject:
+            self.addToBlenderCollection()
 
         # Set name
         self.blender_object.name = self.name
         # if self.parent:
         #     self.blender_object.name = self.parent.name + "." + self.name
 
-        # Set parent if available
-        if self.parent and self.parent.blender_object:
-            self.blender_object.parent = self.parent.blender_object
-            print(
-                f"New parent of '{self.blender_object.name}' is '{self.parent.blender_object.name}'"
-            )
-        else:
-            print(f"Missing parent for {self.name}")
-            collection = bpy.data.collections.get("Collection")
-            try:
-                collection.objects.link(self.blender_object)
-            except RuntimeError:
-                print(f"{self.name} already exists in Collection.")
-            # self.blender_object.parent = collection
+        # self.write(f"\n{collectionObjects.values()}")
 
-    def createEmptyNode(self):
+        # Set parent of the blender object if a parent is associated with this blueprint
+        if self.parent:
+            if not self.parent.blender_object:
+                self.write("PARENT IS MISSING!")
+            self.blender_object.parent = self.parent.blender_object
+            self.write(f"New parent = {self.parent.blender_object.name}\n\n")
+        # else:
+        #     # self.print(f"Missing parent")
+        #     try:
+        #         self.addToScene()
+        #         self.write("Linked to collection.")
+        #     except RuntimeError as error:
+        #         self.write(f"Could not link. {error}")
+
+    def _createBlenderObject(self):
         """
-        Private create method.
-        Creates an empty node if not overriden.
+        Private method to create the blender object/node AND add it to the scene, since some geometries like cube are automatically added.
+        By default, creates an empty object.
         """
-        self.blender_object = bpy.data.objects.new(self.name, None)
-        self.blender_object.name = self.name
-        bpy.context.scene.collection.objects.link(self.blender_object)
+        blenderObject = bpy.data.objects.new(self.name, None)
+        blenderObject.name = self.name
+        return blenderObject
+
+    def addToBlenderCollection(self):
+        """Adds the blender object to the blender "SceneCollection/Collection" node."""
+        # To retrieve the collection...
+        # - Does work:      bpy.context.collection.objects
+        # - Does work:      bpy.data.collections.get("Collection")
+        # - Does not work:  bpy.context.scene.collection
+        collectionObjects = bpy.context.collection.objects
+        try:
+            collectionObjects.link(self.blender_object)
+            self.write("Object added to blender collection.")
+        except RuntimeError as error:
+            self.write(f"Could not add. {error}")
 
 
 class BlueprintContainer(Blueprint):
@@ -131,7 +154,7 @@ class BlueprintContainer(Blueprint):
             #     print("bla")
 
 
-class Cuboid(Blueprint):
+class CuboidBlueprint(Blueprint):
     """Use this to specify a cuboid that will be rendered."""
 
     def __init__(
@@ -152,6 +175,8 @@ class Cuboid(Blueprint):
         self.top = top
         self.back = back
         self.front = front
+
+        self.automaticallyAddsBlenderObject = True
 
     def move(self, x=0, y=0, z=0):
         self.left += y
@@ -282,7 +307,8 @@ class Cuboid(Blueprint):
 
     # Functions
 
-    def createEmptyNode(self):
+    def _createBlenderObject(self):
+        """Adds a cube node."""
         dimensions = self.frontrighttop - self.backleftbot
         location = self.backleftbot + dimensions / 2
 
@@ -294,7 +320,7 @@ class Cuboid(Blueprint):
             scale=dimensions,
         )
 
-        self.blender_object = bpy.context.object
+        return bpy.context.object
 
     def __str__(self):
         return f"Cube: {self.left} to {self.right}, {self.bot} to {self.top}, {self.back} to {self.front}"
@@ -308,7 +334,7 @@ class Cuboid(Blueprint):
         return cuboid
 
 
-class Box(BlueprintContainer):
+class BoxBlueprint(BlueprintContainer):
 
     def __init__(
         self,
@@ -352,7 +378,7 @@ class Box(BlueprintContainer):
         )
 
         # Bot part
-        botpart = Cuboid("botpart", self)
+        botpart = CuboidBlueprint("botpart", self)
         botpart.backleftbot = backleftbot
         botpart.height = thickness
         botpart.width = width
@@ -365,7 +391,7 @@ class Box(BlueprintContainer):
             botpart.front -= thickness
 
         # Left part
-        leftpart = Cuboid("leftpart", self)
+        leftpart = CuboidBlueprint("leftpart", self)
         leftpart.backleftbot = backleftbot
         leftpart.width = thickness
         leftpart.front = depth
@@ -378,7 +404,7 @@ class Box(BlueprintContainer):
             leftpart.front -= thickness
 
         # Back part
-        backpart = Cuboid("backpart", self)
+        backpart = CuboidBlueprint("backpart", self)
         backpart.backleftbot = backleftbot
         backpart.depth = thickness
         backpart.width = width
@@ -459,8 +485,8 @@ class Quad(Blueprint):
 
     def __init__(
         self,
+        parent: Blueprint,
         name="Quad",
-        parent: Blueprint = None,
         vertices=[(1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0)],
     ):
         """Anti-clockwise order."""
@@ -471,24 +497,26 @@ class Quad(Blueprint):
         self.edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
         self.faces = [(0, 1, 2, 3)]
 
-    def createEmptyNode(self):
-        """
-        Private create method.
-        Creates an empty node if not overriden.
-        """
-        # Create mesh and object
-        mesh = bpy.data.meshes.new("QuadMesh")
-        self.blender_object = bpy.data.objects.new(self.name, mesh)
-
-        # Set mesh location and scene
-        self.blender_object.location = bpy.context.scene.cursor.location
-        bpy.context.collection.objects.link(self.blender_object)
+    def _createBlenderObject(self):
+        """Creates a QuadMesh."""
 
         # Create mesh
+        mesh = bpy.data.meshes.new("QuadMesh")
         mesh.from_pydata(self.vertices, self.edges, self.faces)
+
+        # Create object with mesh
+        blenderObject = bpy.data.objects.new(self.name, mesh)
+
+        # Set location
+        blenderObject.location = bpy.context.scene.cursor.location
+
+        # Link to collection. This is neccessary for all objects?
+        # addToScene(self)
 
         # Update mesh geometry
         mesh.update()
+
+        return blenderObject
 
 
 def enumerate_two_elements(list):
@@ -540,7 +568,7 @@ class Palisade(BlueprintContainer):
         for (point, nextPoint), (offsetted, nextOffsetted) in zip(
             enumerate_two_elements(basePoints), enumerate_two_elements(offsettedPoints)
         ):
-            quad = Quad("Quad", self, [point, nextPoint, nextOffsetted, offsetted])
+            quad = Quad(self, "Quad", [point, nextPoint, nextOffsetted, offsetted])
             self.add_child(quad)
 
 
@@ -549,8 +577,8 @@ class Frame3d(BlueprintContainer):
 
     def __init__(
         self,
+        parent: Blueprint,
         name="Frame3d",
-        parent: Blueprint = None,
         botLeft=Vector((0, 0, 0)),
         width=2,
         height=1,
@@ -634,23 +662,23 @@ class Frame(BlueprintContainer):
         ]
 
         self.botQuad = Quad(
-            "BotQuad",
             self,
+            "BotQuad",
             [botLeft, self.botRight, self.botRightInner, self.botLeftInner],
         )
         self.rightQuad = Quad(
-            "RightQuad",
             self,
+            "RightQuad",
             [self.botRight, self.topRight, self.topRightInner, self.botRightInner],
         )
         self.topQuad = Quad(
-            "TopQuad",
             self,
+            "TopQuad",
             [self.topRight, self.topLeft, self.topLeftInner, self.topRightInner],
         )
         self.leftQuad = Quad(
-            "LeftQuad",
             self,
+            "LeftQuad",
             [self.topLeft, botLeft, self.botLeftInner, self.topLeftInner],
         )
         self.quads = [
@@ -663,9 +691,9 @@ class Frame(BlueprintContainer):
 
 
 frame = Frame3d(
-    "WindowFrame", None, width=1.235, height=1.27, frameWidth=0.069, depth=0.014
+    None, "WindowFrame", width=1.235, height=1.27, frameWidth=0.069, depth=0.014
 )
-window = Quad("Windowpane", None, frame.innerPalisade.halfOffsettedPoints)
+windowQuad = Quad(None, "WindowQuad", frame.innerPalisade.halfOffsettedPoints)
 
 frame.create()
-window.create()
+windowQuad.create()
