@@ -41,6 +41,24 @@ forward = Vector((1, 0, 0))
 backward = Vector((-1, 0, 0))
 
 
+class BooleanOperation(Enum):
+    Difference = 0
+    Intersect = 0
+    Union = 0
+
+
+def booleanOperation(firstObject, secondObject, operation=BooleanOperation.Difference):
+
+    # Apply boolean modifier to subtract cylinder from cuboid
+    modifier = firstObject.modifiers.new(name="Boolean", type="BOOLEAN")
+    modifier.operation = operation.name.upper()
+    modifier.object = secondObject
+
+    # Select the object and apply the modifier
+    bpy.context.view_layer.objects.active = firstObject
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+
 class Side(Enum):
     BotTop = 0
     """Bot and top. """
@@ -156,6 +174,23 @@ class BlueprintContainer(Blueprint):
             #     print("bla")
 
 
+class LastAddedBlenderObject:
+    """
+    Helping class for working with the last added Blender object defined by bpy.context.object.
+    Removes the object after the "with" block.
+    """
+
+    def __init__(self):
+        self.object = None
+
+    def __enter__(self):
+        self.object = bpy.context.object
+        return self.object
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        bpy.data.objects.remove(self.object)
+
+
 class CylinderBlueprint(Blueprint):
 
     def __init__(
@@ -165,23 +200,38 @@ class CylinderBlueprint(Blueprint):
         height=1,
         radius=0.5,
         location=(0, 0, 0),
+        vertices=64,
     ):
         super().__init__(name, parent)
         self.height = height
         self.radius = radius
         self.location = location
+        self.vertices = vertices
+
         self.isBlenderObjectAddedDuringCreation = True
+
+    def tempScene(self):
+        # Create a new temporary scene
+        temp_scene = bpy.data.scenes.new(name="TempScene")
+        # Set the temporary scene as the active scene
+        old_scene = bpy.context.scene
+        bpy.context.window.scene = temp_scene
+
+        ...
+
+        # Restore the original active scene
+        bpy.context.window.scene = old_scene
 
     def _createBlenderObject(self):
 
-        # bpy.ops.mesh.primitive_cone_add()
+        # Create cylinder
         bpy.ops.mesh.primitive_cylinder_add(
-            # radius=self.radius,
-            # location=self.location,
-            # depth=self.height,
+            radius=self.radius,
+            location=self.location,
+            depth=self.height,  # Depth is height...
+            vertices=self.vertices,
             # scale=(self.radius, self.radius, self.height),
         )
-
         return bpy.context.object
 
 
@@ -747,3 +797,9 @@ class Frame(BlueprintContainer):
 
 cylinder = CylinderBlueprint(None)
 cylinder.create()
+
+
+# Cut hole in to cylinder
+bpy.ops.mesh.primitive_cylinder_add(radius=0.2, depth=5, location=(0, 0, 0))
+with LastAddedBlenderObject() as object:
+    booleanOperation(cylinder.blenderObject, object)
