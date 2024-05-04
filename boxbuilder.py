@@ -54,14 +54,16 @@ class Blueprint:
     """An instruction how a geometric is rendered."""
 
     def __init__(self, name="Blueprint", parent: "Blueprint" = None):
-        self.name = f"{((parent.name + '.') if parent else '')}{name}"
+        # self.name = f"{((parent.name + '.') if parent else '')}{name}"
+        self.name = name
         self.parent: Blueprint = parent
         """The parent blueprint (if available). """
 
         self.blenderObject: bpy.types.Object = None
         """The created Blender object. This is None if create() was not called yet. """
 
-        self.automaticallyAddsBlenderObject = False
+        self.isBlenderObjectAddedDuringCreation = False
+        """ If true, the _createBlenderObject already adds the blender object to the collection. Neccessary as some creation methods automatically do this. """
 
     def __repr__(self) -> str:
         return f"{type(self)} {self.name}"
@@ -80,7 +82,7 @@ class Blueprint:
 
         self.blenderObject = self._createBlenderObject()
 
-        if not self.automaticallyAddsBlenderObject:
+        if not self.isBlenderObjectAddedDuringCreation:
             self.addToBlenderCollection()
 
         # Set name
@@ -154,13 +156,42 @@ class BlueprintContainer(Blueprint):
             #     print("bla")
 
 
+class CylinderBlueprint(Blueprint):
+
+    def __init__(
+        self,
+        parent: Blueprint,
+        name="Cylinder",
+        height=1,
+        radius=0.5,
+        location=(0, 0, 0),
+    ):
+        super().__init__(name, parent)
+        self.height = height
+        self.radius = radius
+        self.location = location
+        self.isBlenderObjectAddedDuringCreation = True
+
+    def _createBlenderObject(self):
+
+        # bpy.ops.mesh.primitive_cone_add()
+        bpy.ops.mesh.primitive_cylinder_add(
+            # radius=self.radius,
+            # location=self.location,
+            # depth=self.height,
+            # scale=(self.radius, self.radius, self.height),
+        )
+
+        return bpy.context.object
+
+
 class CuboidBlueprint(Blueprint):
     """Use this to specify a cuboid that will be rendered."""
 
     def __init__(
         self,
-        name="Cuboid",
         parent: Blueprint = None,
+        name="Cuboid",
         left=0,
         right=1,
         bot=0,
@@ -176,7 +207,7 @@ class CuboidBlueprint(Blueprint):
         self.back = back
         self.front = front
 
-        self.automaticallyAddsBlenderObject = True
+        self.isBlenderObjectAddedDuringCreation = True
 
     def move(self, x=0, y=0, z=0):
         self.left += y
@@ -378,7 +409,7 @@ class BoxBlueprint(BlueprintContainer):
         )
 
         # Bot part
-        botpart = CuboidBlueprint("botpart", self)
+        botpart = CuboidBlueprint(self, "botpart")
         botpart.backleftbot = backleftbot
         botpart.height = thickness
         botpart.width = width
@@ -391,7 +422,7 @@ class BoxBlueprint(BlueprintContainer):
             botpart.front -= thickness
 
         # Left part
-        leftpart = CuboidBlueprint("leftpart", self)
+        leftpart = CuboidBlueprint(self, "leftpart")
         leftpart.backleftbot = backleftbot
         leftpart.width = thickness
         leftpart.front = depth
@@ -404,7 +435,7 @@ class BoxBlueprint(BlueprintContainer):
             leftpart.front -= thickness
 
         # Back part
-        backpart = CuboidBlueprint("backpart", self)
+        backpart = CuboidBlueprint(self, "backpart")
         backpart.backleftbot = backleftbot
         backpart.depth = thickness
         backpart.width = width
@@ -480,7 +511,7 @@ class BoxBlueprint(BlueprintContainer):
 # box3.create()
 
 
-class Quad(Blueprint):
+class QuadBlueprint(Blueprint):
     """Use this to specify a quad that will be rendered."""
 
     def __init__(
@@ -553,14 +584,17 @@ class Palisade(BlueprintContainer):
         super().__init__(name, parent)
 
         self.basePoints = basePoints
+        """ The points that determine the bottom of the palisade polygon. """
+
         self.closeLoop = closeLoop
+        """ If true, the starting point will be appended to the end. This creates a closed list of points. """
 
         self.halfOffsettedPoints = [point + 0.5 * offset for point in basePoints]
 
         offsettedPoints = [point + offset for point in basePoints]
         self.offsettedPoints = offsettedPoints
 
-        # Add start to end?
+        # May add start point to end
         if closeLoop:
             basePoints.append(basePoints[0])
             offsettedPoints.append(offsettedPoints[0])
@@ -568,11 +602,14 @@ class Palisade(BlueprintContainer):
         for (point, nextPoint), (offsetted, nextOffsetted) in zip(
             enumerate_two_elements(basePoints), enumerate_two_elements(offsettedPoints)
         ):
-            quad = Quad(self, "Quad", [point, nextPoint, nextOffsetted, offsetted])
+            quad = QuadBlueprint(
+                self, "Quad", [point, nextPoint, nextOffsetted, offsetted]
+            )
             self.add_child(quad)
 
 
-class Frame3d(BlueprintContainer):
+# To do: Dont group back, front and sides together but rather each board (top, left, right, bottom)
+class Frame3dBlueprint(BlueprintContainer):
     """A 3d frame consisting of two 2d frames and their connection. Like an actual window frame."""
 
     def __init__(
@@ -623,7 +660,17 @@ class Frame3d(BlueprintContainer):
 
 
 class Frame(BlueprintContainer):
-    """A flat frame consisting of 4 quads like a window front."""
+    """A flat 2d frame consisting of 4 quads like a window front.
+
+    |\''''''''''''''/|
+    | |''''''''''''| |
+    | |            | |
+    | |            | |
+    | |            | |
+    | |____________| |
+    |/______________\|
+
+    """
 
     def __init__(
         self,
@@ -661,22 +708,22 @@ class Frame(BlueprintContainer):
             self.topLeftInner,
         ]
 
-        self.botQuad = Quad(
+        self.botQuad = QuadBlueprint(
             self,
             "BotQuad",
             [botLeft, self.botRight, self.botRightInner, self.botLeftInner],
         )
-        self.rightQuad = Quad(
+        self.rightQuad = QuadBlueprint(
             self,
             "RightQuad",
             [self.botRight, self.topRight, self.topRightInner, self.botRightInner],
         )
-        self.topQuad = Quad(
+        self.topQuad = QuadBlueprint(
             self,
             "TopQuad",
             [self.topRight, self.topLeft, self.topLeftInner, self.topRightInner],
         )
-        self.leftQuad = Quad(
+        self.leftQuad = QuadBlueprint(
             self,
             "LeftQuad",
             [self.topLeft, botLeft, self.botLeftInner, self.topLeftInner],
@@ -690,10 +737,13 @@ class Frame(BlueprintContainer):
         self.add_children(self.quads)
 
 
-frame = Frame3d(
-    None, "WindowFrame", width=1.235, height=1.27, frameWidth=0.069, depth=0.014
-)
-windowQuad = Quad(None, "WindowQuad", frame.innerPalisade.halfOffsettedPoints)
+# frame = Frame3dBlueprint(
+#     None, "WindowFrame", width=1.235, height=1.27, frameWidth=0.069, depth=0.014
+# )
+# windowQuad = QuadBlueprint(None, "WindowQuad", frame.innerPalisade.halfOffsettedPoints)
 
-frame.create()
-windowQuad.create()
+# frame.create()
+# windowQuad.create()
+
+cylinder = CylinderBlueprint(None)
+cylinder.create()
