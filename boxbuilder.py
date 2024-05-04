@@ -15,8 +15,10 @@ from mathutils import Vector
 from enum import Enum
 
 from Cuboid import *
-
+from numpy import sin, cos, pi
 import bmesh
+
+tau = 2 * pi
 
 
 def clear_objects():
@@ -26,7 +28,10 @@ def clear_objects():
     #     obj for obj in bpy.context.scene.objects if obj.name.startswith("Cube")
     # ]
     # print(bpy.context.mode)
-    bpy.ops.object.mode_set(mode="OBJECT")
+    try:
+        bpy.ops.object.mode_set(mode="OBJECT")
+    except RuntimeError as error:
+        print(f"Cannot set object mode: {error}")
     # print(bpy.context.mode)
     bpy.ops.object.select_all(action="DESELECT")
     for objext in objects:
@@ -149,6 +154,9 @@ class Blueprint:
             self.write("Object added to blender collection.")
         except RuntimeError as error:
             self.write(f"Could not add. {error}")
+
+    def copy(self, newName, newParent):
+        return Blueprint(newName, newParent)
 
 
 class BlueprintContainer(Blueprint):
@@ -565,7 +573,46 @@ class BoxBlueprint(BlueprintContainer):
 # box3.create()
 
 
-class QuadBlueprint(Blueprint):
+# class PolygonBlueprint(Blueprint):
+#     """Use this to specify a quad that will be rendered."""
+
+#     def __init__(
+#         self,
+#         parent: Blueprint,
+#         name="Quad",
+#         vertices=[(1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0)],
+#     ):
+#         """Anti-clockwise order."""
+#         super().__init__(name, parent)
+
+#         # Vertices coordinates
+#         self.vertices = vertices
+#         self.edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+#         self.faces = [(0, 1, 2, 3)]
+
+#     def _createBlenderObject(self):
+#         """Creates a QuadMesh."""
+
+#         # Create mesh
+#         mesh = bpy.data.meshes.new("QuadMesh")
+#         mesh.from_pydata(self.vertices, self.edges, self.faces)
+
+#         # Create object with mesh
+#         blenderObject = bpy.data.objects.new(self.name, mesh)
+
+#         # Set location
+#         blenderObject.location = bpy.context.scene.cursor.location
+
+#         # Link to collection. This is neccessary for all objects?
+#         # addToScene(self)
+
+#         # Update mesh geometry
+#         mesh.update()
+
+#         return blenderObject
+
+
+class PolygonBlueprint(Blueprint):
     """Use this to specify a quad that will be rendered."""
 
     def __init__(
@@ -579,8 +626,10 @@ class QuadBlueprint(Blueprint):
 
         # Vertices coordinates
         self.vertices = vertices
-        self.edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
-        self.faces = [(0, 1, 2, 3)]
+        vertexCount = len(vertices)
+        # if len(vertices) == 4:
+        self.edges = [(i, (i + 1) % (vertexCount)) for i in range(vertexCount)]
+        self.faces = [tuple(range(vertexCount))]
 
     def _createBlenderObject(self):
         """Creates a QuadMesh."""
@@ -656,7 +705,7 @@ class Palisade(BlueprintContainer):
         for (point, nextPoint), (offsetted, nextOffsetted) in zip(
             enumerate_two_elements(basePoints), enumerate_two_elements(offsettedPoints)
         ):
-            quad = QuadBlueprint(
+            quad = PolygonBlueprint(
                 self, "Quad", [point, nextPoint, nextOffsetted, offsetted]
             )
             self.add_child(quad)
@@ -762,22 +811,22 @@ class Frame(BlueprintContainer):
             self.topLeftInner,
         ]
 
-        self.botQuad = QuadBlueprint(
+        self.botQuad = PolygonBlueprint(
             self,
             "BotQuad",
             [botLeft, self.botRight, self.botRightInner, self.botLeftInner],
         )
-        self.rightQuad = QuadBlueprint(
+        self.rightQuad = PolygonBlueprint(
             self,
             "RightQuad",
             [self.botRight, self.topRight, self.topRightInner, self.botRightInner],
         )
-        self.topQuad = QuadBlueprint(
+        self.topQuad = PolygonBlueprint(
             self,
             "TopQuad",
             [self.topRight, self.topLeft, self.topLeftInner, self.topRightInner],
         )
-        self.leftQuad = QuadBlueprint(
+        self.leftQuad = PolygonBlueprint(
             self,
             "LeftQuad",
             [self.topLeft, botLeft, self.botLeftInner, self.topLeftInner],
@@ -859,8 +908,8 @@ def extrude2(object, length=1):
 # frame.create()
 # windowQuad.create()
 
-cylinder = CylinderBlueprint(None)
-cylinder.create()
+# cylinder = CylinderBlueprint(None)
+# cylinder.create()
 
 
 # # Cut hole into cylinder
@@ -869,4 +918,21 @@ cylinder.create()
 #     booleanOperation(cylinder.blenderObject, object)
 
 # extrude(cylinder.blenderObject)
-extrude2(cylinder.blenderObject, 2)
+# extrude2(cylinder.blenderObject, 2)
+
+
+def calculateRegularPolygonPoints(sideCount, radius):
+    points = []
+    angleDelta = tau / sideCount
+    for index in range(sideCount):
+        angle = index * angleDelta
+        x = radius * cos(angle)
+        y = radius * sin(angle)
+        points.append((x, y, 0))
+    return points
+
+
+hexagonPoints = calculateRegularPolygonPoints(6, 1)
+
+PolygonBlueprint(None, "Polygon").create()
+# PolygonBlueprint(None, "Polygon", hexagonPoints).create()
