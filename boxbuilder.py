@@ -10,6 +10,7 @@ import sys
 
 sys.path.append("E:/Coding/BlueprintCreator")
 import bpy
+import bmesh
 from mathutils import Vector
 from enum import Enum
 
@@ -24,6 +25,9 @@ def clear_objects():
     # cube_objs = [
     #     obj for obj in bpy.context.scene.objects if obj.name.startswith("Cube")
     # ]
+    # print(bpy.context.mode)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    # print(bpy.context.mode)
     bpy.ops.object.select_all(action="DESELECT")
     for objext in objects:
         objext.select_set(True)
@@ -787,6 +791,66 @@ class Frame(BlueprintContainer):
         self.add_children(self.quads)
 
 
+def extrude(object, length=2):
+    """Thanks to: https://blender.stackexchange.com/questions/115397/extrude-in-python"""
+    # Select object
+    bpy.context.view_layer.objects.active = object
+
+    # Enter edit and face mode, then select all faces
+    bpy.ops.object.mode_set(mode="EDIT")  # Toggle edit mode
+    bpy.ops.mesh.select_mode(type="FACE")  # Change to face selection
+    bpy.ops.mesh.select_all(action="SELECT")  # Select all faces
+
+    # Create Bmesh
+    mesh = bmesh.from_edit_mesh(bpy.context.object.data)
+
+    # Select last? normal
+    for face in mesh.faces:
+        normal = face.normal
+
+    # Extrude mesh
+    geometry = bmesh.ops.extrude_face_region(mesh, geom=mesh.faces[:])
+    # Collect BMVERT vertices from extrusion
+    vertices = [it for it in geometry["geom"] if isinstance(it, bmesh.types.BMVert)]
+    direction = normal * length  # Extrude Strength/Length
+    bmesh.ops.translate(mesh, vec=direction, verts=vertices)
+
+    # Update & destroy Bmesh
+    bmesh.update_edit_mesh(bpy.context.object.data)  # Write the bmesh back to the mesh
+    mesh.free()  # free and prevent further access
+
+    # Flip normals
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.flip_normals()
+
+    # Recalculate UV
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project()
+
+    # Switch back to object mode
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    # Origin to center
+    bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+
+
+def extrude2(object, length=1):
+    """Extrude the selected faces of the object."""
+    # Select object
+    bpy.context.view_layer.objects.active = object
+
+    # Enter edit mode, face selection mode, and select all faces
+    bpy.ops.object.mode_set(mode="EDIT")  # Toggle edit mode
+    bpy.ops.mesh.select_mode(type="FACE")  # Change to face selection
+    bpy.ops.mesh.select_all(action="SELECT")  # Select all faces
+
+    # Extrude the selected faces
+    bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, length)})
+
+    # Switch back to object mode
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
 # frame = Frame3dBlueprint(
 #     None, "WindowFrame", width=1.235, height=1.27, frameWidth=0.069, depth=0.014
 # )
@@ -799,7 +863,10 @@ cylinder = CylinderBlueprint(None)
 cylinder.create()
 
 
-# Cut hole in to cylinder
-bpy.ops.mesh.primitive_cylinder_add(radius=0.2, depth=5, location=(0, 0, 0))
-with LastAddedBlenderObject() as object:
-    booleanOperation(cylinder.blenderObject, object)
+# # Cut hole into cylinder
+# bpy.ops.mesh.primitive_cylinder_add(radius=0.2, depth=5, location=(0, 0, 0))
+# with LastAddedBlenderObject() as object:
+#     booleanOperation(cylinder.blenderObject, object)
+
+# extrude(cylinder.blenderObject)
+extrude2(cylinder.blenderObject, 2)
