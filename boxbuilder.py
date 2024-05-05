@@ -21,21 +21,55 @@ import bmesh
 tau = 2 * pi
 
 
-def clear_objects():
-    objects = bpy.context.scene.objects
-    # # Find and delete all objects with names starting with "Cube"
-    # cube_objs = [
-    #     obj for obj in bpy.context.scene.objects if obj.name.startswith("Cube")
-    # ]
-    # print(bpy.context.mode)
+def setObjectMode():
     try:
         bpy.ops.object.mode_set(mode="OBJECT")
     except RuntimeError as error:
         print(f"Cannot set object mode: {error}")
-    # print(bpy.context.mode)
+
+
+def setEditMode():
+    try:
+        bpy.ops.object.mode_set(mode="EDIT")
+    except RuntimeError as error:
+        print(f"Cannot set edit mode: {error}")
+
+
+def getMode():
+    return bpy.context.mode
+
+
+def deselectAll():
     bpy.ops.object.select_all(action="DESELECT")
-    for objext in objects:
-        objext.select_set(True)
+
+
+def selectAll():
+    bpy.ops.object.select_all(action="SELECT")
+
+
+def clear_objects(filter=""):
+    objects = bpy.context.scene.objects
+
+    # Find and delete all objects where filter is in name
+    if filter:
+        objects = [it for it in bpy.context.scene.objects if filter in it.name]
+
+    setObjectMode()
+
+    deselectAll()
+
+    for object in objects:
+        object.hide_set(False)
+        object.select_set(True)
+
+    bpy.ops.object.delete()
+
+
+def removeObject(object):
+    # Deselect all
+    bpy.ops.object.select_all(action="DESELECT")
+    # Select object and delete
+    object.select_set(True)
     bpy.ops.object.delete()
 
 
@@ -52,20 +86,65 @@ backward = Vector((-1, 0, 0))
 
 class BooleanOperation(Enum):
     Difference = 0
-    Intersect = 0
-    Union = 0
+    Intersect = 1
+    Union = 2
 
 
-def booleanOperation(firstObject, secondObject, operation=BooleanOperation.Difference):
+def union(objects: list):
+    """Unites all objects on the first object. THIS WILL FAIL FOR MORE THAN 2 OBJECTS."""
+    booleanOperationMultiple(objects, BooleanOperation.Union)
+
+
+def booleanOperationMultiple(objects: list, operation: BooleanOperation):
+    """Executes all operations between the first and the other objects."""
+    firstObject = objects[0]
+    otherObjects = objects[1:]
+    for otherObject in otherObjects:
+        booleanOperation(firstObject, otherObject, operation)
+
+
+def subtract(object: bpy.types.Object, subtractedObject: bpy.types.Object):
+    """Substracts the second from the first object."""
+    booleanOperation(object, subtractedObject, BooleanOperation.Difference)
+
+
+def unite(object: bpy.types.Object, addedObject: bpy.types.Object):
+    """Adds the second to the first object."""
+    booleanOperation(object, addedObject, BooleanOperation.Union)
+
+
+def intersect(object: bpy.types.Object, intersectingObject: bpy.types.Object):
+    """Reduces the object by intersecting with another object."""
+    booleanOperation(object, intersectingObject, BooleanOperation.Intersect)
+
+
+def booleanOperation(
+    firstObject: bpy.types.Object,
+    secondObject: bpy.types.Object,
+    operation: BooleanOperation,
+):
+    operationName = operation.name.upper()
+    modifierName = f"{firstObject.name} {operationName} {secondObject.name}"
 
     # Apply boolean modifier to subtract cylinder from cuboid
-    modifier = firstObject.modifiers.new(name="Boolean", type="BOOLEAN")
-    modifier.operation = operation.name.upper()
+    modifier = firstObject.modifiers.new(name=modifierName, type="BOOLEAN")
+    modifier.operation = operationName
     modifier.object = secondObject
+
+    if not (firstObject.visible_get() and not firstObject.hide_render):
+        raise Error("Object must be visible")
 
     # Select the object and apply the modifier
     bpy.context.view_layer.objects.active = firstObject
-    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    # bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+    # firstObject.modifiers.clear()
+
+    # Recalculate normals (not sure if neccessary)
+    setEditMode()
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+    setObjectMode()
 
 
 class Side(Enum):
@@ -80,23 +159,45 @@ class Side(Enum):
 class Blueprint:
     """An instruction how a geometric is rendered."""
 
-    def __init__(self, name="Blueprint", parent: "Blueprint" = None):
+    def __init__(
+        self, name="Blueprint", parent: "Blueprint" = None, offset=Vector((0, 0, 0))
+    ):
         # self.name = f"{((parent.name + '.') if parent else '')}{name}"
         self.name = name
+
         self.parent: Blueprint = parent
         """The parent blueprint (if available). """
 
-        self.blenderObject: bpy.types.Object = None
+        self.offset = offset
+        """ Position offset when creating the object. """
+
+        self.object: bpy.types.Object = None
         """The created Blender object. This is None if create() was not called yet. """
 
         self.isBlenderObjectAddedDuringCreation = False
         """ If true, the _createBlenderObject already adds the blender object to the collection. Neccessary as some creation methods automatically do this. """
+
+    def hide(self):
+        self.object.hide_set(True)
+
+    def show(self):
+        self.object.hide_set(False)
+
+    def remove(self):
+        # Deselect all
+        bpy.ops.object.select_all(action="DESELECT")
+        # Select object and delete
+        self.object.select_set(True)
+        bpy.ops.object.delete()
 
     def __repr__(self) -> str:
         return f"{type(self)} {self.name}"
 
     def write(self, message: str) -> None:
         print(self.name + ": " + str(message))
+
+    def __sub__(self, other):
+        return subtract(self, other)
 
     # @staticmethod
     # def roundfloat(value, roundTo=0.001):
@@ -107,13 +208,14 @@ class Blueprint:
         """Creates a Blender object from this blueprint.
         Also sets the parent if it is available."""
 
-        self.blenderObject = self._createBlenderObject()
-
+        self.object = self._createBlenderObject()
+        self.object.location += self.offset
+        # self.blenderObject
         if not self.isBlenderObjectAddedDuringCreation:
             self.addToBlenderCollection()
 
         # Set name
-        self.blenderObject.name = self.name
+        self.object.name = self.name
         # if self.parent:
         #     self.blender_object.name = self.parent.name + "." + self.name
 
@@ -121,10 +223,10 @@ class Blueprint:
 
         # Set parent of the blender object if a parent is associated with this blueprint
         if self.parent:
-            if not self.parent.blenderObject:
+            if not self.parent.object:
                 self.write("PARENT IS MISSING!")
-            self.blenderObject.parent = self.parent.blenderObject
-            self.write(f"New parent = {self.parent.blenderObject.name}\n\n")
+            self.object.parent = self.parent.object
+            self.write(f"New parent = {self.parent.object.name}\n\n")
         # else:
         #     # self.print(f"Missing parent")
         #     try:
@@ -133,7 +235,7 @@ class Blueprint:
         #     except RuntimeError as error:
         #         self.write(f"Could not link. {error}")
 
-    def _createBlenderObject(self):
+    def _createBlenderObject(self) -> bpy.types.Object:
         """
         Private method to create the blender object/node AND add it to the scene, since some geometries like cube are automatically added.
         By default, creates an empty object.
@@ -150,7 +252,7 @@ class Blueprint:
         # - Does not work:  bpy.context.scene.collection
         collectionObjects = bpy.context.collection.objects
         try:
-            collectionObjects.link(self.blenderObject)
+            collectionObjects.link(self.object)
             self.write("Object added to blender collection.")
         except RuntimeError as error:
             self.write(f"Could not add. {error}")
@@ -207,12 +309,12 @@ class CylinderBlueprint(Blueprint):
 
     def __init__(
         self,
-        parent: Blueprint,
+        parent: Blueprint = None,
         name="Cylinder",
         height=1,
         radius=0.5,
         location=(0, 0, 0),
-        vertices=64,
+        vertices=256,
     ):
         super().__init__(name, parent)
         self.height = height
@@ -234,8 +336,7 @@ class CylinderBlueprint(Blueprint):
         # Restore the original active scene
         bpy.context.window.scene = old_scene
 
-    def _createBlenderObject(self):
-
+    def _createBlenderObject(self) -> bpy.types.Object:
         # Create cylinder
         bpy.ops.mesh.primitive_cylinder_add(
             radius=self.radius,
@@ -400,7 +501,7 @@ class CuboidBlueprint(Blueprint):
 
     # Functions
 
-    def _createBlenderObject(self):
+    def _createBlenderObject(self) -> bpy.types.Object:
         """Adds a cube node."""
         dimensions = self.frontrighttop - self.backleftbot
         location = self.backleftbot + dimensions / 2
@@ -590,7 +691,7 @@ class BoxBlueprint(BlueprintContainer):
 #         self.edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
 #         self.faces = [(0, 1, 2, 3)]
 
-#     def _createBlenderObject(self):
+#     def _createBlenderObject(self) -> bpy.types.Object:
 #         """Creates a QuadMesh."""
 
 #         # Create mesh
@@ -620,9 +721,10 @@ class PolygonBlueprint(Blueprint):
         parent: Blueprint,
         name="Quad",
         vertices=[(1, 1, 0), (-1, 1, 0), (-1, -1, 0), (1, -1, 0)],
+        offset=Vector((0, 0, 0)),
     ):
         """Anti-clockwise order."""
-        super().__init__(name, parent)
+        super().__init__(name, parent, offset)
 
         # Vertices coordinates
         self.vertices = vertices
@@ -631,7 +733,7 @@ class PolygonBlueprint(Blueprint):
         self.edges = [(i, (i + 1) % (vertexCount)) for i in range(vertexCount)]
         self.faces = [tuple(range(vertexCount))]
 
-    def _createBlenderObject(self):
+    def _createBlenderObject(self) -> bpy.types.Object:
         """Creates a QuadMesh."""
 
         # Create mesh
@@ -704,6 +806,51 @@ class Palisade(BlueprintContainer):
 
         for (point, nextPoint), (offsetted, nextOffsetted) in zip(
             enumerate_two_elements(basePoints), enumerate_two_elements(offsettedPoints)
+        ):
+            quad = PolygonBlueprint(
+                self, "Quad", [point, nextPoint, nextOffsetted, offsetted]
+            )
+            self.add_child(quad)
+
+
+class ChangingPalisadeBlueprint(BlueprintContainer):
+    """Specifies quads by base points and an offset by whom they are extruded."""
+
+    def __init__(
+        self,
+        name="Palisade",
+        parent=None,
+        botPoints: list[Vector] = [
+            Vector((0, 0, 0)),
+            Vector((1, 0, 0)),
+            Vector((1, 1, 0)),
+            Vector((0, 1, 0)),
+        ],
+        topPoints: list[Vector] = [
+            Vector((0, 0, 1)),
+            Vector((1, 0, 1)),
+            Vector((1, 1, 1)),
+            Vector((0, 1, 1)),
+        ],
+        closeLoop=True,
+    ):
+        super().__init__(name, parent)
+
+        self.botPoints = botPoints
+        """ The points that determine the bottom of the palisade polygon. """
+        self.topPoints = topPoints
+        """ The points that determine the bottom of the palisade polygon. """
+
+        self.closeLoop = closeLoop
+        """ If true, the starting point will be appended to the end. This creates a closed list of points. """
+
+        # May add start point to end
+        if closeLoop:
+            botPoints.append(botPoints[0])
+            topPoints.append(topPoints[0])
+
+        for (point, nextPoint), (offsetted, nextOffsetted) in zip(
+            enumerate_two_elements(botPoints), enumerate_two_elements(topPoints)
         ):
             quad = PolygonBlueprint(
                 self, "Quad", [point, nextPoint, nextOffsetted, offsetted]
@@ -840,13 +987,13 @@ class Frame(BlueprintContainer):
         self.add_children(self.quads)
 
 
-def extrude(object, length=2):
+def extrudeOld(object, length=2):
     """Thanks to: https://blender.stackexchange.com/questions/115397/extrude-in-python"""
     # Select object
     bpy.context.view_layer.objects.active = object
 
     # Enter edit and face mode, then select all faces
-    bpy.ops.object.mode_set(mode="EDIT")  # Toggle edit mode
+    setEditMode()
     bpy.ops.mesh.select_mode(type="FACE")  # Change to face selection
     bpy.ops.mesh.select_all(action="SELECT")  # Select all faces
 
@@ -877,19 +1024,19 @@ def extrude(object, length=2):
     bpy.ops.uv.smart_project()
 
     # Switch back to object mode
-    bpy.ops.object.mode_set(mode="OBJECT")
+    setObjectMode()
 
     # Origin to center
     bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
 
 
-def extrude2(object, length=1):
+def extrude(object, length=1):
     """Extrude the selected faces of the object."""
     # Select object
     bpy.context.view_layer.objects.active = object
 
     # Enter edit mode, face selection mode, and select all faces
-    bpy.ops.object.mode_set(mode="EDIT")  # Toggle edit mode
+    setEditMode()
     bpy.ops.mesh.select_mode(type="FACE")  # Change to face selection
     bpy.ops.mesh.select_all(action="SELECT")  # Select all faces
 
@@ -897,7 +1044,7 @@ def extrude2(object, length=1):
     bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, length)})
 
     # Switch back to object mode
-    bpy.ops.object.mode_set(mode="OBJECT")
+    setObjectMode()
 
 
 # frame = Frame3dBlueprint(
@@ -921,18 +1068,82 @@ def extrude2(object, length=1):
 # extrude2(cylinder.blenderObject, 2)
 
 
-def calculateRegularPolygonPoints(sideCount, radius):
+def calculateRegularPolygonPoints(
+    sideCount, radius, offset: Vector = Vector((0, 0, 0))
+) -> list[tuple]:
+    """Calculate points for a rectangular flat polygon."""
     points = []
     angleDelta = tau / sideCount
     for index in range(sideCount):
         angle = index * angleDelta
         x = radius * cos(angle)
         y = radius * sin(angle)
-        points.append((x, y, 0))
+        points.append((x + offset.x, y + offset.y, offset.z))
     return points
 
 
-hexagonPoints = calculateRegularPolygonPoints(6, 1)
+def join(first: bpy.types.Object, second: bpy.types.Object):
+    """Joins two blender objects."""
+    first.select_set(True)
+    second.select_set(True)
+    bpy.context.view_layer.objects.active = first
+    bpy.ops.object.join()
 
-PolygonBlueprint(None, "Polygon").create()
-# PolygonBlueprint(None, "Polygon", hexagonPoints).create()
+
+class PrismBlueprint(Blueprint):
+
+    def __init__(
+        self,
+        name="Prism",
+        parent: Blueprint = None,
+        offset=Vector((0, 0, 0)),
+        sideCount=6,
+        height=1,
+        botRadius=1,
+        topRadius=0.8,
+    ):
+        super().__init__(name, parent, offset)
+
+        botVertices = calculateRegularPolygonPoints(sideCount, botRadius)
+        topVertices = calculateRegularPolygonPoints(
+            sideCount, topRadius, Vector((0, 0, height))
+        )
+
+        # The top will be the object the bot and walls are merged to
+        self.top = PolygonBlueprint(None, name, topVertices)
+        self.bot = PolygonBlueprint(None, name + ".Bot", botVertices)
+        self.walls = ChangingPalisadeBlueprint(
+            name + ".Walls", None, topVertices, botVertices
+        )
+
+    def create(self):
+        self.top.create()
+        self.bot.create()
+        self.walls.create()
+
+        # Join all objects
+        join(self.top.object, self.bot.object)
+        for wall in self.walls.children:
+            join(self.top.object, wall.object)
+
+        removeObject(self.walls.object)
+
+        self.object = self.top.object
+
+
+prism = PrismBlueprint(height=2)
+prism.create()
+
+
+# extrude(hexagon.blenderObject, 3)
+
+# subtract(upperHexagon.blenderObject, lowerHexagon.blenderObject)
+# booleanOperation(hexagon.blenderObject, palisade.blenderObject)
+
+
+cylinder = CylinderBlueprint(name="Cylinder", height=2, radius=1)
+cylinder.create()
+
+subtract(cylinder.object, prism.object)
+
+prism.hide()
