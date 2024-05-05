@@ -209,31 +209,20 @@ class Blueprint:
         Also sets the parent if it is available."""
 
         self.object = self._createBlenderObject()
-        self.object.location += self.offset
-        # self.blenderObject
+        self.object.location += Vector(self.offset)
+
         if not self.isBlenderObjectAddedDuringCreation:
             self.addToBlenderCollection()
 
         # Set name
         self.object.name = self.name
-        # if self.parent:
-        #     self.blender_object.name = self.parent.name + "." + self.name
-
-        # self.write(f"\n{collectionObjects.values()}")
 
         # Set parent of the blender object if a parent is associated with this blueprint
         if self.parent:
             if not self.parent.object:
                 self.write("PARENT IS MISSING!")
             self.object.parent = self.parent.object
-            self.write(f"New parent = {self.parent.object.name}\n\n")
-        # else:
-        #     # self.print(f"Missing parent")
-        #     try:
-        #         self.addToScene()
-        #         self.write("Linked to collection.")
-        #     except RuntimeError as error:
-        #         self.write(f"Could not link. {error}")
+            self.write(f"Set parent to {self.parent.object.name}\n\n")
 
     def _createBlenderObject(self) -> bpy.types.Object:
         """
@@ -251,11 +240,14 @@ class Blueprint:
         # - Does work:      bpy.data.collections.get("Collection")
         # - Does not work:  bpy.context.scene.collection
         collectionObjects = bpy.context.collection.objects
-        try:
-            collectionObjects.link(self.object)
-            self.write("Object added to blender collection.")
-        except RuntimeError as error:
-            self.write(f"Could not add. {error}")
+        if False:  # self.name in collectionObjects:
+            self.write(f"Cannot add. Already in collection.")
+        else:
+            try:
+                collectionObjects.link(self.object)
+                self.write("Added to collection.")
+            except RuntimeError as error:
+                self.write(f"Could not add. {error}")
 
     def copy(self, newName, newParent):
         return Blueprint(newName, newParent)
@@ -305,7 +297,46 @@ class LastAddedBlenderObject:
         bpy.data.objects.remove(self.object)
 
 
-class CylinderBlueprint(Blueprint):
+class PrimitiveBlueprint(Blueprint):
+    """A blueprint with isBlenderObjectAddedDuringCreation set to true."""
+
+    def __init__(
+        self, name="Blueprint", parent: Blueprint = None, offset=Vector((0, 0, 0))
+    ):
+        super().__init__(name, parent, offset)
+
+        self.isBlenderObjectAddedDuringCreation = True
+
+
+class ConeBlueprint(PrimitiveBlueprint):
+
+    def __init__(
+        self,
+        parent: Blueprint = None,
+        name="Cone",
+        height=1.0,
+        radius1=1.0,
+        radius2=0.0,
+        offset=(0, 0, 0),
+        resolution=256,
+    ):
+        super().__init__(name, parent, offset)
+        self.height = height
+        self.radius1 = radius1
+        self.radius2 = radius2
+        self.resolution = resolution
+
+    def _createBlenderObject(self) -> bpy.types.Object:
+        bpy.ops.mesh.primitive_cone_add(
+            radius1=self.radius1,
+            radius2=self.radius2,
+            depth=self.height,  # Depth is height...
+            vertices=self.resolution,
+        )
+        return bpy.context.object
+
+
+class CylinderBlueprint(PrimitiveBlueprint):
 
     def __init__(
         self,
@@ -313,42 +344,25 @@ class CylinderBlueprint(Blueprint):
         name="Cylinder",
         height=1,
         radius=0.5,
-        location=(0, 0, 0),
-        vertices=256,
+        offset=(0, 0, 0),
+        resolution=256,
     ):
-        super().__init__(name, parent)
+        super().__init__(name, parent, offset)
         self.height = height
         self.radius = radius
-        self.location = location
-        self.vertices = vertices
-
-        self.isBlenderObjectAddedDuringCreation = True
-
-    def tempScene(self):
-        # Create a new temporary scene
-        temp_scene = bpy.data.scenes.new(name="TempScene")
-        # Set the temporary scene as the active scene
-        old_scene = bpy.context.scene
-        bpy.context.window.scene = temp_scene
-
-        ...
-
-        # Restore the original active scene
-        bpy.context.window.scene = old_scene
+        self.resolution = resolution
 
     def _createBlenderObject(self) -> bpy.types.Object:
-        # Create cylinder
         bpy.ops.mesh.primitive_cylinder_add(
             radius=self.radius,
-            location=self.location,
             depth=self.height,  # Depth is height...
-            vertices=self.vertices,
+            vertices=self.resolution,
             # scale=(self.radius, self.radius, self.height),
         )
         return bpy.context.object
 
 
-class CuboidBlueprint(Blueprint):
+class CuboidBlueprint(PrimitiveBlueprint):
     """Use this to specify a cuboid that will be rendered."""
 
     def __init__(
@@ -369,8 +383,6 @@ class CuboidBlueprint(Blueprint):
         self.top = top
         self.back = back
         self.front = front
-
-        self.isBlenderObjectAddedDuringCreation = True
 
     def move(self, x=0, y=0, z=0):
         self.left += y
@@ -814,7 +826,7 @@ class Palisade(BlueprintContainer):
 
 
 class ChangingPalisadeBlueprint(BlueprintContainer):
-    """Specifies quads by base points and an offset by whom they are extruded."""
+    """Specifies walls with different bottom than top points."""
 
     def __init__(
         self,
@@ -1094,19 +1106,19 @@ class PrismBlueprint(Blueprint):
 
     def __init__(
         self,
-        name="Prism",
         parent: Blueprint = None,
+        name="Prism",
         offset=Vector((0, 0, 0)),
         sideCount=6,
         height=1,
         botRadius=1,
         topRadius=0.8,
     ):
-        super().__init__(name, parent, offset)
+        super().__init__(name, parent)
 
-        botVertices = calculateRegularPolygonPoints(sideCount, botRadius)
+        botVertices = calculateRegularPolygonPoints(sideCount, botRadius, offset)
         topVertices = calculateRegularPolygonPoints(
-            sideCount, topRadius, Vector((0, 0, height))
+            sideCount, topRadius, Vector((0, 0, height)) + offset
         )
 
         # The top will be the object the bot and walls are merged to
@@ -1129,21 +1141,44 @@ class PrismBlueprint(Blueprint):
         removeObject(self.walls.object)
 
         self.object = self.top.object
+        # self.object.location += Vector(self.offset)
 
 
-prism = PrismBlueprint(height=2)
-prism.create()
+hexPrism = PrismBlueprint(
+    None,
+    "HexPrism",
+    sideCount=6,
+    height=1.0001,
+    offset=Vector((0, 0, 0.0)),
+    topRadius=0.9,
+    botRadius=0.8,
+)
+hexPrism.create()
 
-
-# extrude(hexagon.blenderObject, 3)
-
-# subtract(upperHexagon.blenderObject, lowerHexagon.blenderObject)
-# booleanOperation(hexagon.blenderObject, palisade.blenderObject)
-
-
-cylinder = CylinderBlueprint(name="Cylinder", height=2, radius=1)
+cylinder = CylinderBlueprint(
+    None, "Cylinder", height=2, radius=1, offset=Vector((0, 0, 0))
+)
 cylinder.create()
 
-subtract(cylinder.object, prism.object)
+cone = ConeBlueprint(
+    None, "Cone", radius1=0, radius2=1, height=1.0, offset=Vector((0, 0, 0.5))
+)
+cone.create()
 
-prism.hide()
+subtract(cylinder.object, cone.object)
+cone.hide()
+
+# Remove hexPrism from cylinder
+subtract(cylinder.object, hexPrism.object)
+hexPrism.hide()
+
+implant = PrismBlueprint(
+    None,
+    "HexPrism",
+    sideCount=6,
+    height=1.0001,
+    offset=Vector((0, 0, 2.0)),
+    topRadius=0.9,
+    botRadius=0.8,
+)
+implant.create()
